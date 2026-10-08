@@ -132,7 +132,7 @@
 
 | Лимит | Значение | Проявление |
 |---|---|---|
-| HTTP-тело | collect **30 MB** (код), docs говорят 25 MB на файл | >30MB → по-хорошему 413; **наблюдается crash сервера на 36MB** (дважды воспроизведено — bug) |
+| HTTP-тело | collect **30 MB** (код), docs говорят 25 MB на файл | 36MB: **v0.9.19 (стабл) — честный `413`** ✅; на **nightly headless (v1.0.0) — креш сервера** (дважды воспроизведено, должен быть 413) |
 | Размер файла | **25 MB** (`defaultMaxFileBytes`) — гейтится в `auto_crop`-пробе | 413 fileTooLarge |
 | Страниц PDF | **50** (`defaultMaxPages`) | 422 превышение |
 | Изображение | **4096 px** сторона (docs) | 422 imageDimensionsExceeded |
@@ -140,6 +140,13 @@
 | Форматы — реально принимает (ошибка 400 перечисляет) | `BMP, GIF, HEIC, JPEG, JPG, PDF, PNG, TIF, TIFF, WEBP` | шире, чем docs (png/jpg/jpeg/heic/pdf) |
 
 multipart `barcode`/`classify` на PDF → 400 «Unsupported file format» (задокументировано: image-only).
+
+**Разница версий (v0.9.19 стабл vs nightly v1.0.0 headless):**
+- `>25MB` → 413 vs **креш процесса** (headless уходит из сети, LaunchAgent KeepAlive поднимает сам)
+- chat + `apple_vision_ocr` → OCR-инъекция работает на обеих; на v0.9.19 `500`, если OCR на входе не дал текста (например, QR-картинка — ошибка инъекции вместо graceful)
+- chat без тулов с картинкой → на nightly отвечает мультимодально; на v0.9.19 **501 `internal error`** на любой image-контент
+- `recognition_level=fast` на мелком тексте → может вернуть 422 «No text» (accurate на том же входе находит) — учёт при тестах
+- `GET /v1/vision/ocr` → 404 на обеих наблюдавшихся сборках
 
 ---
 
@@ -182,7 +189,8 @@ multipart `barcode`/`classify` на PDF → 400 «Unsupported file format» (з�
 
 - Заголовки ответов: `X-Request-ID`, `OpenAI-Request-ID` (req_…); большинство ответов `application/json; charset=utf-8`.
 - CORS: только `OPTIONS`-preflight (origin `*`); на самих POST-ответах ACAO есть в text/table-ветке.
-- Баги найденные: (1) битый base64 → 500 (должен 400); (2) >25-30MB телом крешит процесс afm (limiter не срабатывает — headless-beast дважды падал); (3) `/v1/ocr` в openapi — 404; (4) multipart multi-file игнорирует не-first поля.
+- Баги найденные: (1) битый base64 → 500 (должен 400); (2) на nightly headless >25-30MB телом крешит процесс afm вместо 413 (на стабле v0.9.19 — 413 работает); (3) `/v1/ocr` в openapi — 404; (4) multipart multi-file игнорирует не-first поля.
+- Скрипт-проверка: `./check_all_ocr.sh` (дефолт `http://127.0.0.1:9999`; `BASE_URL=http://100.64.89.91:9999 ./check_all_ocr.sh` — headless). Полный регресс-выпуск: 2026-10-08 PASS на локальном v0.9.19 (все режимы, QR exact, chat-инъекция, 413).
 
 ## 9. curl-минимум для каждого режима
 

@@ -40,12 +40,14 @@
 | битый base64 | ❌ **500 вместо 400** (по docs/openapi должен быть 400) |
 | не-картинка | ✅ 400 (принятые форматы: BMP,GIF,HEIC,JPEG,JPG,PDF,PNG,TIF,TIFF,WEBP — шире, чем docs: png/jpg/jpeg/heic/pdf) |
 | без текста | ✅ 422 |
-| GET /v1/vision/ocr | ✅ 405 |
-| **POST файл 36MB** | ❌ **креш сервера целиком** (headless-beast уходит из tailnet), воспроизведено дважды. Лимит 25MB не гейтит приём тела, должен возвращать 413 |
-| chat+tool `apple_vision_ocr` (tool_choice=auto) | ✅ OCR-инъекция: `[Apple Vision OCR image 1] <OCR-текст>` |
-| chat без тулов (посмотрит сам) | ✅ Foundation смотрит на картинку=image сам (мультимодальный ответ) |
+| GET /v1/vision/ocr | ✅ 405/404 (nightly 405; v0.9.19 404) |
+| **POST файл 36MB** | ❌ **креш сервера целиком** — только на nightly headless (v1.0.0), воспроизведено дважды. На стабле **v0.9.19 — честный `413`** ✅ |
+| chat+tool `apple_vision_ocr` (tool_choice=auto) | ✅ OCR-инъекция: `[Apple Vision OCR image 1] <OCR-текст>` — на v0.9.19 500, если OCR не дал текста (QR-вход) |
+| chat без тулов (посмотрит сам) | nightly ✅ мультимодальный ответ; v0.9.19 ❌ 500 на любой image-контент |
 
-**2 бага:** (1) битый base64 → 500 вместо 400; (2) >25MB upload крешит процесс (должен 413).
+**2 бага:** (1) битый base64 → 500 вместо 400; (2) nightly: >25MB upload крешит процесс (должен 413; в стабле v0.9.19 исправлено).
+
+**Регресс локального v0.9.19 от 2026-10-08** (`./check_all_ocr.sh`, дефолт `127.0.0.1:9999`): все 6 форматов входа, text/table/barcode(QR exact: `HELLO-AFM-OCR-2026`, conf=1)/classify/saliency×2/auto(`modes_run=[text,barcode,classify]`)/debug, `response_format=text` → text/plain, опции, 400/404/422, 413, chat-инъекция — PASS. Нюанс: `recognition_level=fast` на мелком шрифте → 422 «No text» (accurate находит).
 
 | Возможность | Vision API | Ваш прогон (нативно) | Web-ручка AFM |
 |---|---|---|---|
