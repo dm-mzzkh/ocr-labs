@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.afm.ocr</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/afm</string>
+    <string>--prewarm</string>
+    <string>n</string>
+    <string>-H</string>
+    <string>0.0.0.0</string>
+    <string>-p</string>
+    <string>9999</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/afm.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/afm.err.log</string>
+</dict>
+</plist>

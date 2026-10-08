@@ -1,0 +1,5 @@
+.swiftpm/xcode/
+xcuserdata/
+.build/
+.DS_Store
+.opencode/

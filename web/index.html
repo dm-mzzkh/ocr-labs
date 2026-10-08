@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Vision OCR Overlay</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px -apple-system, sans-serif; background: #111; color: #eee; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  #drop {
+    border: 2px dashed #555; border-radius: 12px; padding: 48px;
+    text-align: center; cursor: pointer; transition: border-color .2s;
+  }
+  #drop.hover { border-color: #4af; background: #16202a; }
+  #status { margin: 12px 0; min-height: 1.2em; }
+  #status.error { color: #f66; white-space: pre-line; }
+  #controls { margin: 12px 0; display: none; gap: 8px; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  #canvasWrap { margin-top: 12px; }
+  canvas { max-width: 100%; display: block; }
+</style>
+</head>
+<body>
+<h1>Vision OCR Overlay</h1>
+<div id="drop">Перетащите изображение сюда или нажмите, чтобы выбрать</div>
+<input type="file" id="file" accept="image/*" hidden>
+<div id="status"></div>
+<div id="controls">
+  <button id="download">Скачать PNG</button>
+</div>
+<div id="canvasWrap"><canvas id="canvas"></canvas></div>
+
+<script>
+const AFM_URL = 'http://100.64.89.91:9999/v1/vision/ocr';
+const MIN_CONFIDENCE = 0.5;
+const BLUR = 6;
+const PAD = 4;
+
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const statusEl = document.getElementById('status');
+const controls = document.getElementById('controls');
+const canvas = document.getElementById('canvas');
+
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('hover'); };
+drop.ondragleave = () => drop.classList.remove('hover');
+drop.ondragend = () => drop.classList.remove('hover');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('hover'); handleFile(e.dataTransfer.files[0]); };
+fileInput.onchange = () => { handleFile(fileInput.files[0]); fileInput.value = ''; };
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = isError ? 'error' : '';
+}
+
+async function handleFile(file) {
+  if (!file || !file.type.startsWith('image/')) { setStatus('Нужен файл-изображение', true); return; }
+  setStatus('Загрузка...');
+  controls.style.display = 'none';
+  const imageUrl = URL.createObjectURL(file);
+  const form = new FormData();
+  form.append('file', file);
+
+  let resp;
+  try {
+    resp = await fetch(AFM_URL, {
+      method: 'POST',
+      body: form,
+    });
+  } catch (e) {
+    setStatus('Не удалось подключиться к afm на ' + AFM_URL +
+      '\nЗапустите сервер: afm (порт по умолчанию 9999)', true);
+    return;
+  }
+
+  const body = await resp.json();
+  if (!resp.ok) {
+    setStatus('HTTP ' + resp.status + '\n' + JSON.stringify(body, null, 2).slice(0, 2000), true);
+    return;
+  }
+
+  const blocks = (body.documents?.[0]?.pages?.[0]?.text_blocks || [])
+    .filter(b => (b.confidence ?? 1) >= MIN_CONFIDENCE && b.bounding_box);
+
+  if (!blocks.length) { setStatus('Текст не найден'); controls.style.display = 'none'; return; }
+
+  setStatus('Найдено блоков: ' + blocks.length);
+  await render(imageUrl, blocks,
+    body.documents?.[0]?.pages?.[0]?.width || 0,
+    body.documents?.[0]?.pages?.[0]?.height || 0);
+  controls.style.display = 'flex';
+}
+
+function loadImage(src) {
+  return new Promise((ok, err) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = err;
+    img.src = src;
+  });
+}
+
+async function render(dataUrl, blocks, pageW, pageH) {
+  const img = await loadImage(dataUrl);
+  canvas.width = pageW && pageH ? pageW : img.naturalWidth;
+  canvas.height = pageW && pageH ? pageH : img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  for (const b of blocks) {
+    const bx = b.bounding_box.x * canvas.width;
+    // Vision boxes use a bottom-left origin; canvas uses a top-left origin.
+    const by = (1 - b.bounding_box.y - b.bounding_box.height) * canvas.height;
+    const bw = b.bounding_box.width * canvas.width;
+    const bh = b.bounding_box.height * canvas.height;
+    // blur the found rectangle: redraw that region with a blur filter
+    ctx.save();
+    ctx.filter = `blur(${BLUR}px)`;
+    ctx.drawImage(canvas, bx - PAD, by - PAD, bw + 2 * PAD, bh + 2 * PAD,
+      bx - PAD, by - PAD, bw + 2 * PAD, bh + 2 * PAD);
+    ctx.restore();
+
+    drawStrokedText(ctx, b.text, bx, by, bw, bh);
+  }
+}
+
+// white letters with black outline, fitted into the box
+function drawStrokedText(ctx, text, x, y, w, h) {
+  const lines = text.split('\n');
+  let size = h / lines.length;
+  ctx.textBaseline = 'middle';
+  for (;;) {
+    ctx.font = `bold ${size}px -apple-system, sans-serif`;
+    if (size <= 1 || Math.max(...lines.map(l => ctx.measureText(l).width)) <= w) break;
+    size--;
+  }
+  ctx.lineWidth = Math.max(1, size / 6);
+  ctx.strokeStyle = '#000';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  const lineH = size * 1.05;
+  const startY = y + h / 2 - (lines.length - 1) * lineH / 2;
+  lines.forEach((l, i) => {
+    const cy = startY + i * lineH;
+    ctx.strokeText(l, x, cy);
+    ctx.fillText(l, x, cy);
+  });
+}
+
+document.getElementById('download').onclick = () => {
+  const a = document.createElement('a');
+  a.download = 'ocr-overlay.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+};
+</script>
+</body>
+</html>
